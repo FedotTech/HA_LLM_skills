@@ -33,3 +33,7 @@ regex = '''\b[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}\b'''
 id = "plain-credential"
 description = "Пароль или токен открытым текстом (заглушки <...> не считаются)"
 regex = '''(?i)\b(?:password|passwd|token|secret|api_key)\s*[:=]\s*["']?[^\s"'<>{}$`]{3,}'''
+[[rules.allowlists]]
+description = "Ссылки на секреты (!secret key) — не сами секреты"
+regexTarget = "match"
+regexes = ['''['"]?!secret\b''']
