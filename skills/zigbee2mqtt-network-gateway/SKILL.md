@@ -132,8 +132,18 @@ PY
 скачивается готовым, сборки нет. Бери тег, который уже лежит локально, —
 тогда и качать нечего.
 
-`/usr/share/hassio/homeassistant/zigbee2mqttN/configuration.yaml`. Логин и
-пароль MQTT возьми из соседнего экземпляра, не выдумывай:
+`/usr/share/hassio/homeassistant/zigbee2mqttN/configuration.yaml`. Логин MQTT
+возьми из соседнего экземпляра, не выдумывай. **Пароль в `configuration.yaml`
+не пиши** — только ссылку на файл секретов рядом (`!secret` — встроенный
+механизм Zigbee2MQTT). Иначе он уедет в git вместе с конфигурацией:
+
+```sh
+umask 077; cp ../zigbee2mqtt/secret.yaml secret.yaml   # или: printf 'password: <...>\n' > secret.yaml
+```
+
+В `.gitignore` репозитория конфигурации (если он есть) должно быть
+`zigbee2mqtt*/secret.yaml`. Если у соседей пароль ещё открытым текстом —
+предложи пользователю вынести его и сменить (см. «Смена пароля MQTT» ниже).
 
 ```yaml
 version: 4
@@ -143,7 +153,7 @@ mqtt:
   base_topic: zigbee2mqttN
   server: mqtt://<брокер>:1883
   user: <из соседнего экземпляра>
-  password: <из соседнего экземпляра>
+  password: '!secret password'
   keepalive: 60
   reject_unauthorized: true
   version: 4
@@ -182,12 +192,18 @@ docker exec hassio_cli ha <A> install local_zigbee2mqttN
 ```json
 {"options": {"data_path": "/config/zigbee2mqttN",
              "socat": {"...": "как в config.json"},
-             "mqtt": {"base_topic": "zigbee2mqttN", "server": "mqtt://<брокер>:1883",
-                      "user": "<...>", "password": "<...>"},
+             "mqtt": {"base_topic": "zigbee2mqttN", "server": "mqtt://<брокер>:1883"},
              "serial": {}},
  "watchdog": true,
  "ingress_panel": true}
 ```
+
+- **`user` и `password` в параметры дополнения не клади.** Дополнение
+  передаёт их в Zigbee2MQTT через переменные окружения
+  (`ZIGBEE2MQTT_CONFIG_MQTT_PASSWORD`), и они перекрывают `secret.yaml` — при
+  смене пароля придётся помнить про два места. А `server` оставь: если в
+  `mqtt` нет ни `server`, ни `user`, ни `password`, дополнение подставит
+  служебную учётную запись Supervisor вместо вашей.
 
 - `watchdog: true` — сторожевой таймер Supervisor. По умолчанию **выключен**.
 - `ingress_panel: true` — пункт в боковой панели. По умолчанию **выключен**,
@@ -250,6 +266,33 @@ Zigbee2MQTT при потере связи с координатором сам 
   socat-порт, автоматизация).
 - Напомни пользователю: локальное дополнение не обновляется само. Новая
   версия — поменять `version` в его `config.json`, `ha store reload`, `ha <A> update`.
+
+## Смена пароля MQTT
+
+Пароль один на многих клиентов — сначала найди **всех**, иначе кто-то молча
+отвалится.
+
+1. Опись: `grep -rlI <логин> /usr/share/hassio/homeassistant` и параметры
+   дополнений в `/usr/share/hassio/<A>.json`. Внешние устройства (реле,
+   шлюзы с MQTT) по `ss` не видны — Docker перенаправляет порт брокера
+   правилами ядра. Смотри таблицу соединений:
+   `grep -E "dport=(1883|8883) " /proc/net/nf_conntrack | grep ESTABLISHED`.
+   Журнал брокера (`New client connected ... u'<логин>'`) показывает только
+   подключившихся после его старта; перезапуск брокера заставит всех
+   переподключиться и попасть в журнал.
+2. Новый пароль генерируй на сервере в файл с правами 600 и подставляй из
+   него — в переписку он попадать не должен.
+3. Обнови: `secret.yaml` каждого Zigbee2MQTT, `logins` в параметрах
+   дополнения Mosquitto (POST `/addons/core_mosquitto/options` с полным
+   объектом `options`), каждое внешнее устройство (через его веб-интерфейс
+   или API).
+4. Перезапусти брокер, затем все Zigbee2MQTT. Несколько отказов
+   `not authorised` сразу после перезапуска брокера — это старые процессы;
+   дальше должны идти только `New client connected`.
+5. Проверь: все `<base_topic>/bridge/state` = online, внешние устройства
+   online, `mosquitto_pub -u <логин> -P <старый>` → `not authorised`.
+6. Старый пароль в истории git после смены недействителен — переписывать
+   историю не нужно.
 
 ## Разбор «экземпляр оказался не запущен»
 
