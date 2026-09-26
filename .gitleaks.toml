@@ -1,0 +1,35 @@
+# Проверка навыков перед публикацией: встроенные правила gitleaks (секреты)
+# + детали конкретной установки, которые секретами не считаются, но в
+# публичный репозиторий попадать не должны.
+title = "HA skills"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "ipv4-address"
+description = "IPv4-адрес (кроме документационных 192.0.2.x, 198.51.100.x, 203.0.113.x)"
+regex = '''\b(?:\d{1,3}\.){3}\d{1,3}\b'''
+[[rules.allowlists]]
+regexTarget = "match"
+regexes = ['''^(192\.0\.2|198\.51\.100|203\.0\.113)\.\d+$''', '''^(0\.0\.0\.0|127\.0\.0\.1)$''']
+
+[[rules]]
+id = "mac-address"
+description = "MAC-адрес"
+regex = '''\b[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}\b'''
+
+[[rules]]
+id = "zigbee-ieee"
+description = "Zigbee IEEE-адрес устройства"
+regex = '''\b0x[0-9a-fA-F]{16}\b'''
+
+[[rules]]
+id = "email"
+description = "E-mail"
+regex = '''\b[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}\b'''
+
+[[rules]]
+id = "plain-credential"
+description = "Пароль или токен открытым текстом (заглушки <...> не считаются)"
+regex = '''(?i)\b(?:password|passwd|token|secret|api_key)\s*[:=]\s*["']?[^\s"'<>{}$`]{3,}'''
