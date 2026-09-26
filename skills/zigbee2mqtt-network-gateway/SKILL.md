@@ -160,11 +160,14 @@ mqtt:
 serial:
   port: tcp://<IP шлюза>:6638
   adapter: zstack
+availability:
+  enabled: true
 advanced:
   channel: <свободный канал>
   network_key: GENERATE
   pan_id: GENERATE
   ext_pan_id: GENERATE
+  last_seen: ISO_8601
 frontend:
   enabled: true
   port: 8099
@@ -179,6 +182,11 @@ devices: {}
 - `GENERATE` даёт уникальные ключ и pan_id. После первого запуска z2m впишет
   реальные значения — сверь pan_id с соседями.
 - Порт фронтенда 8099 у всех экземпляров одинаковый — это нормально, наружу он не выставлен.
+- `availability` (по умолчанию выключен) — отслеживание доступности: сетевые
+  устройства опрашиваются после 10 минут молчания, батарейные считаются
+  недоступными после 25 часов. Без него умерший датчик месяцами выглядит живым
+  (реальный случай: датчик с батареей 0% никто не замечал). `last_seen:
+  ISO_8601` — атрибут «когда устройство выходило на связь» у сущностей HA.
 
 ## 4. Установка и параметры
 
@@ -193,10 +201,23 @@ docker exec hassio_cli ha <A> install local_zigbee2mqttN
 {"options": {"data_path": "/config/zigbee2mqttN",
              "socat": {"...": "как в config.json"},
              "mqtt": {"base_topic": "zigbee2mqttN", "server": "mqtt://<брокер>:1883"},
-             "serial": {}},
+             "serial": {},
+             "watchdog": "default"},
  "watchdog": true,
  "ingress_panel": true}
 ```
+
+Здесь **два разных watchdog**, нужны оба:
+- `options.watchdog: "default"` — встроенный сторож самого Zigbee2MQTT
+  (переменная Z2M_WATCHDOG). Z2M при обрыве TCP-связи со шлюзом завершается и
+  сам не переподключается; встроенный сторож перезапускает его изнутри с
+  паузами 2 с → 1 → 5 → 15 → 30 → 60 мин (итого ~2 часа попыток) и обходит
+  падение «write after end» (Koenkk/zigbee2mqtt#33088). Короткий обрыв
+  (перезагрузка шлюза) сторож закрывает за секунды. Ограничение: включается
+  только после первого удачного старта — холодный старт при недоступном шлюзе
+  он не спасает, для этого автоматизация из шага 5.
+- верхнеуровневый `watchdog: true` — сторож Supervisor, перезапускает
+  контейнер, если тот умер; сдаётся примерно за минуту (5 попыток по 10 с).
 
 - **`user` и `password` в параметры дополнения не клади.** Дополнение
   передаёт их в Zigbee2MQTT через переменные окружения
@@ -241,6 +262,35 @@ Zigbee2MQTT при потере связи с координатором сам 
       addon: local_zigbee2mqttN
     continue_on_error: true
   mode: single
+```
+
+Туда же полезно добавить уведомление о недоступных устройствах (availability
+из шага 3 должен быть включён). Один блок на все экземпляры, триггер — MQTT
+с подстановкой:
+
+```yaml
+- id: zigbee_device_offline_alert
+  alias: Zigbee_Уведомление о недоступном устройстве
+  triggers:
+  - trigger: mqtt
+    topic: zigbee2mqtt/+/availability
+  - trigger: mqtt
+    topic: zigbee2mqttN/+/availability
+  conditions:
+  - condition: template
+    value_template: '{{ ''offline'' in trigger.payload }}'
+  actions:
+  - action: persistent_notification.create
+    data:
+      title: Zigbee устройство недоступно
+      message: '{{ trigger.topic.split(''/'')[1] }} (сеть {{ trigger.topic.split(''/'')[0] }}) перестало выходить на связь'
+      notification_id: zigbee_offline_{{ trigger.topic.split('/')[1] }}
+  - action: notify.notify
+    continue_on_error: true
+    data:
+      message: '{{ trigger.topic.split(''/'')[1] }} перестало выходить на связь'
+  mode: parallel
+  max: 10
 ```
 
 Имя датчика не угадывай — возьми из реестра после первого запуска:
